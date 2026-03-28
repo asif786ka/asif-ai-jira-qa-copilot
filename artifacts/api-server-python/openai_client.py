@@ -1,17 +1,17 @@
 import os
 import re
-from openai import OpenAI
+from openai import AsyncOpenAI
 
-_client: OpenAI | None = None
+_client: AsyncOpenAI | None = None
 
 
-def get_client() -> OpenAI:
+def get_client() -> AsyncOpenAI:
     global _client
     if _client is None:
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
             raise RuntimeError("OPENAI_API_KEY environment variable is required.")
-        _client = OpenAI(api_key=api_key)
+        _client = AsyncOpenAI(api_key=api_key)
     return _client
 
 
@@ -24,7 +24,7 @@ def strip_fences(raw: str) -> str:
 async def call_openai(system_prompt: str, user_prompt: str) -> str:
     client = get_client()
 
-    completion = client.chat.completions.create(
+    completion = await client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": system_prompt},
