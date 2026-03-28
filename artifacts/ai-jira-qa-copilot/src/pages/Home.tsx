@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/primitives";
 import { ArchitecturePanel } from "@/components/ArchitecturePanel";
 import { TestCaseCard } from "@/components/TestCaseCard";
+import { BackendSwitcher } from "@/components/BackendSwitcher";
 import { useGenerateTestCases } from "@workspace/api-client-react";
 import type { GenerateTestCasesResponse, JiraTicket } from "@workspace/api-client-react";
 
@@ -143,9 +144,12 @@ export function Home() {
               </span>
             </h1>
           </div>
-          <div className="text-sm font-medium text-gray-400 flex items-center gap-2">
-            <Layers className="w-4 h-4" />
-            Test Generation System
+          <div className="flex items-center gap-4">
+            <BackendSwitcher />
+            <div className="text-sm font-medium text-gray-400 flex items-center gap-2">
+              <Layers className="w-4 h-4" />
+              Test Generation System
+            </div>
           </div>
         </div>
       </header>
