@@ -1,8 +1,8 @@
 # Asif AI Jira QA Copilot
 
-A full-stack TypeScript web application that accepts Jira-style ticket input and uses OpenAI (GPT-4o-mini) to generate 3–6 structured QA test cases per ticket.
+A full-stack TypeScript/Python web application that accepts Jira-style ticket input and uses OpenAI (GPT-4o-mini) to generate 3–6 structured QA test cases per ticket.
 
-Demonstrates **OpenAPI-first design**, **Zod validation**, **generated React Query hooks**, and **modular prompt engineering** with a premium dark-themed UI.
+Features **dual backends** — Node.js (Express + Zod) and Python (FastAPI + Pydantic) — with a **runtime backend switcher** in the UI. Demonstrates **OpenAPI-first design**, **generated React Query hooks**, **modular prompt engineering**, and a premium dark-themed UI.
 
 **Author:** Asif — Senior AI & React Architect
 
@@ -59,9 +59,11 @@ Demonstrates **OpenAPI-first design**, **Zod validation**, **generated React Que
 | Styling | Tailwind CSS v4 | Utility-first dark theme |
 | Animation | Framer Motion | Card entry animations, accordion transitions |
 | Icons | Lucide React | Consistent icon set |
-| API Server | Express 5 | REST API with middleware pipeline |
+| API Server (Node) | Express 5 | REST API with middleware pipeline |
+| API Server (Python) | FastAPI | Python REST API with Pydantic validation |
 | AI Model | OpenAI GPT-4o-mini | Structured JSON generation |
-| Validation | Zod v3 | Runtime schema validation (request + response) |
+| Validation (Node) | Zod v3 | Runtime schema validation (request + response) |
+| Validation (Python) | Pydantic v2 | Python-native data models with validators |
 | API Design | OpenAPI 3.1 | Single source of truth for contracts |
 | Codegen | Orval | Generates Zod schemas + React Query hooks |
 | Server State | TanStack Query v5 | Mutation management with caching |
@@ -80,6 +82,27 @@ Demonstrates **OpenAPI-first design**, **Zod validation**, **generated React Que
 - **Collapsible test cards** — Preconditions, steps, test data, expected results
 - **Raw JSON inspector** — Syntax-highlighted expandable output panel
 - **Architecture panel** — System overview with roadmap
+- **Dual backends** — Node.js (Express + Zod) and Python (FastAPI + Pydantic) running simultaneously
+- **Backend switcher** — Toggle between backends at runtime from the UI header, persisted in localStorage
+
+## Pydantic vs Zod — When to Use Which
+
+| Aspect | Zod (Node.js) | Pydantic (Python) |
+|--------|---------------|-------------------|
+| Language | TypeScript/JavaScript | Python |
+| Best With | Express, Next.js, tRPC | FastAPI, LangChain, Python workers |
+| Codegen | Generated from OpenAPI via Orval | Hand-written to match spec |
+| Validation Style | Schema-first, `.safeParse()` | Model-first, `model_validate()` |
+| Custom Rules | `.superRefine()` callbacks | `@model_validator` / `@field_validator` |
+| Serialization | Manual `JSON.stringify` | Built-in `.model_dump()` / `.model_dump_json()` |
+| AI/LLM Pipelines | Good — works with OpenAI SDK | Excellent — native to LangChain, instructor |
+| Type Safety | Inferred via `z.infer<>` | Native Python type hints |
+
+**Use Pydantic when:** your backend is Python, you use FastAPI, you want Python-native data models, your AI orchestration layer is Python-heavy (LangChain, instructor, etc.)
+
+**Use Zod when:** your backend is TypeScript/Node.js, you want OpenAPI codegen integration, you need browser-side validation, or you want a unified JS/TS stack.
+
+This project implements **both** so you can compare the same validation pipeline side-by-side.
 
 ## Project Structure
 
@@ -89,19 +112,25 @@ Demonstrates **OpenAPI-first design**, **Zod validation**, **generated React Que
 │   ├── api-zod/           # Generated Zod validation schemas
 │   └── api-client-react/  # Generated React Query hooks + TypeScript types
 ├── artifacts/
-│   ├── api-server/        # Express 5 backend
+│   ├── api-server/        # Express 5 backend (Node.js)
 │   │   └── src/
 │   │       ├── openai.ts      # Lazy OpenAI client wrapper
 │   │       ├── prompt.ts      # System + user prompt builders
 │   │       └── routes/
 │   │           ├── generate.ts # POST /api/generate endpoint
 │   │           └── health.ts   # GET /api/healthz endpoint
+│   ├── api-server-python/     # FastAPI backend (Python)
+│   │   ├── main.py            # FastAPI app + routes (POST /pyapi/generate)
+│   │   ├── models.py          # Pydantic v2 models (JiraTicket, TestCase, etc.)
+│   │   ├── openai_client.py   # Lazy OpenAI client (same pattern as Node.js)
+│   │   └── prompt.py          # System + user prompt builders (Python port)
 │   └── ai-jira-qa-copilot/   # React frontend
 │       └── src/
-│           ├── pages/Home.tsx          # Main 3-column layout
+│           ├── pages/Home.tsx              # Main 3-column layout
 │           └── components/
-│               ├── TestCaseCard.tsx     # Expandable test case card
-│               └── ArchitecturePanel.tsx # System architecture sidebar
+│               ├── TestCaseCard.tsx         # Expandable test case card
+│               ├── BackendSwitcher.tsx      # Node.js ↔ Python toggle
+│               └── ArchitecturePanel.tsx    # System architecture sidebar
 ```
 
 ---
@@ -362,6 +391,7 @@ const isError = mutation.isError;        // boolean
 ### Prerequisites
 - Node.js 20+ installed
 - pnpm installed (`npm install -g pnpm`)
+- Python 3.12+ installed (for the Python backend)
 - An OpenAI API key with credits (from platform.openai.com)
 
 ### Steps
@@ -373,26 +403,33 @@ cd asif-ai-jira-qa-copilot
 
 # 2. Install all dependencies
 pnpm install
+pip install fastapi uvicorn openai pydantic
 
 # 3. Set your OpenAI API key
 export OPENAI_API_KEY=sk-your-key-here
 
-# 4. Start the API server (Terminal 1)
+# 4. Start the Node.js API server (Terminal 1)
 export PORT=8080
 pnpm --filter @workspace/api-server run dev
 
-# 5. Start the frontend (Terminal 2)
+# 5. Start the Python API server (Terminal 2)
+cd artifacts/api-server-python
+PORT=5000 python main.py
+
+# 6. Start the frontend (Terminal 3)
 export PORT=3000
 export BASE_PATH=/
 pnpm --filter @workspace/ai-jira-qa-copilot run dev
 
-# 6. Open http://localhost:3000 in your browser
+# 7. Open http://localhost:3000 in your browser
+# 8. Use the backend switcher in the header to toggle between Node.js and Python
 ```
 
 ### Troubleshooting
 - **429 errors:** Your OpenAI account needs credits — add billing at platform.openai.com
 - **Codegen issues:** Run `pnpm --filter @workspace/api-spec run codegen`
 - **Stale types:** Rebuild declarations with `npx tsc --build` in lib/api-zod and lib/api-client-react
+- **Python backend not starting:** Ensure Python 3.12+ is installed and `pip install fastapi uvicorn openai pydantic` ran successfully
 
 ---
 
