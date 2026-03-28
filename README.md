@@ -166,7 +166,7 @@ This generates:
 
 ### Step 2: OpenAI Integration — Model Selection & Client Design
 
-**File:** `artifacts/api-server/src/openai.ts`
+**File:** `artifacts/api-server-python/openai_client.py`
 
 **Model choice: GPT-4o-mini**
 | Factor | Decision |
@@ -177,36 +177,63 @@ This generates:
 | Temperature | 0.3 — low creativity, high reliability and consistency |
 | Response Format | `json_object` mode — native JSON enforcement |
 
-**Lazy singleton pattern:**
-```typescript
-let _client: OpenAI | null = null;
+**Lazy singleton pattern (Python):**
+```python
+from openai import AsyncOpenAI
 
-function getClient(): OpenAI {
-  if (!_client) {
-    const apiKey = process.env["OPENAI_API_KEY"];
-    if (!apiKey) throw new Error("OPENAI_API_KEY required");
-    _client = new OpenAI({ apiKey });
-  }
-  return _client;
-}
+_client: AsyncOpenAI | None = None
+
+def get_client() -> AsyncOpenAI:
+    global _client
+    if _client is None:
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            raise RuntimeError("OPENAI_API_KEY environment variable is required.")
+        _client = AsyncOpenAI(api_key=api_key)
+    return _client
 ```
 
 **Why lazy?** If the API key is missing, the health endpoint (`/api/healthz`) still works. The error only surfaces when someone calls `/api/generate`. Critical for deployment health checks — your load balancer can verify the server is alive without a valid OpenAI key.
 
+**Why AsyncOpenAI?** FastAPI runs on an async event loop. Using the synchronous `OpenAI` client would block the loop and prevent concurrent request handling. `AsyncOpenAI` uses `await` natively, so multiple requests can be processed in parallel without thread-pool overhead.
+
 **Safety net — fence stripping:**
-Even with JSON mode, some edge cases may produce markdown fences. `stripFences()` normalizes the response to a clean JSON string as a safety net.
+```python
+def strip_fences(raw: str) -> str:
+    result = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
+    result = re.sub(r"\s*```\s*$", "", result, flags=re.IGNORECASE)
+    return result.strip()
+```
+Even with JSON mode, some edge cases may produce markdown fences. `strip_fences()` normalizes the response to a clean JSON string.
+
+**Async call flow:**
+```python
+async def call_openai(system_prompt: str, user_prompt: str) -> str:
+    client = get_client()
+    completion = await client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        response_format={"type": "json_object"},
+        temperature=0.3,
+    )
+    raw = completion.choices[0].message.content or ""
+    return strip_fences(raw)
+```
 
 ---
 
 ### Step 3: Prompt Engineering — The Brain of the System
 
-**File:** `artifacts/api-server/src/prompt.ts`
+**File:** `artifacts/api-server-python/prompt.py`
 
-The prompt is split into two modular parts:
+The prompt is split into two modular functions:
 
-**System Prompt (persona + rules):**
+**System Prompt (persona + rules) — `build_system_prompt()`:**
 - Acts as a "senior QA engineer and test architect"
-- Must generate 3–6 test cases (enforced by both prompt AND Zod)
+- Must generate 3–6 test cases (enforced by both prompt AND Pydantic `@model_validator`)
 - Must cover: positive paths, negative paths, AND edge cases
 - Each test step must be atomic (one action per step)
 - Expected results must be specific and measurable (not "it works")
@@ -214,7 +241,8 @@ The prompt is split into two modular parts:
 - Defines tag taxonomy: smoke, regression, negative, ui, api, validation, boundary, happy-path, security, performance
 - The exact JSON output schema is embedded in the prompt
 
-**User Prompt (dynamic ticket assembly):**
+**User Prompt (dynamic ticket assembly) — `build_user_prompt(ticket)`:**
+- Accepts a Pydantic `JiraTicket` model instance
 - Assembles only fields that have values (empty fields omitted to save tokens)
 - Acceptance criteria are numbered for clarity
 - Labels joined as comma-separated list
@@ -231,57 +259,72 @@ The prompt is split into two modular parts:
 **Why modular prompts?**
 - A/B test different system prompts without touching the API route
 - Unit test prompt builders independently
-- Swap models by changing only `openai.ts` — prompts stay the same
+- Swap models by changing only `openai_client.py` — prompts stay the same
 - Version-control prompt iterations alongside code
 
 ---
 
-### Step 4: Guardrails — Dual Validation Pipeline
+### Step 4: Guardrails — Pydantic Validation Pipeline
 
-**File:** `artifacts/api-server/src/routes/generate.ts`
+**File:** `artifacts/api-server-python/main.py` + `artifacts/api-server-python/models.py`
 
 LLMs are non-deterministic — you cannot trust raw output. This is the most critical architectural decision: **validate everything twice**.
 
 **The 6-step pipeline:**
 ```
-Request → [1. Zod Input Validation] → [2. Build Prompts] → [3. Call OpenAI]
-        → [4. JSON Parse] → [5. Zod Output + superRefine] → [6. Return or Error]
+Request → [1. Pydantic Input Validation] → [2. Build Prompts] → [3. Call OpenAI]
+        → [4. JSON Parse] → [5. Pydantic Output + @model_validator] → [6. Return or Error]
 ```
 
-**Step 1 — Input validation:**
-```typescript
-const parseResult = GenerateTestCasesBody.safeParse(req.body);
+**Step 1 — Input validation (Pydantic):**
+```python
+try:
+    ticket = JiraTicket(**body)
+except ValidationError as e:
+    return JSONResponse(status_code=400, content=ErrorResponse(
+        error="Invalid request payload", details=str(e)
+    ).model_dump(mode="json"))
 ```
-If `ticket_id` or `summary` is missing, returns 400 with structured error.
+If `ticket_id` or `summary` is missing, returns 400 with structured error. Pydantic validates types, required fields, and default values automatically from the model definition.
 
 **Step 4 — JSON parsing:**
-Even with JSON mode, `JSON.parse()` is wrapped in try/catch. If the model returns garbage, returns 500 with a human-readable message.
+```python
+try:
+    parsed = json.loads(raw_json)
+except json.JSONDecodeError:
+    return JSONResponse(status_code=500, content=ErrorResponse(
+        error="LLM returned invalid JSON",
+        details="The model did not return parseable JSON. Please try again."
+    ).model_dump(mode="json"))
+```
+Even with JSON mode, `json.loads()` is wrapped in try/except. If the model returns garbage, returns 500 with a human-readable message.
 
-**Step 5 — Output validation with superRefine:**
-```typescript
-const StrictGenerateTestCasesResponse = GenerateTestCasesResponse.superRefine(
-  (val, ctx) => {
-    const count = val.generated_test_cases.length;
-    if (count < 3 || count > 6) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["generated_test_cases"],
-        message: `Expected 3-6 test cases, got ${count}`,
-      });
-    }
-  },
-);
+**Step 5 — Output validation with @model_validator:**
+```python
+class GenerateTestCasesResponse(BaseModel):
+    ticket_id: str
+    summary: str
+    generated_test_cases: list[TestCase]
+
+    @model_validator(mode="after")
+    def check_test_case_count(self) -> "GenerateTestCasesResponse":
+        count = len(self.generated_test_cases)
+        if count < 3 or count > 6:
+            raise ValueError(f"Expected 3-6 test cases, got {count}")
+        return self
 ```
 
-**Why superRefine?** Orval's codegen does NOT map OpenAPI `minItems`/`maxItems` to Zod `.min()`/`.max()`. So we add the 3–6 count constraint manually at runtime.
+**Why @model_validator?** Unlike Zod where codegen doesn't map `minItems`/`maxItems`, Pydantic's `@model_validator` lets us enforce the 3–6 count constraint directly in the model definition. The validation runs automatically when constructing `GenerateTestCasesResponse(**parsed)`.
+
+**model_dump(mode="json"):** Pydantic v2 models may contain Python-specific types like `Enum` instances. Using `model_dump(mode="json")` ensures all values are serialized as JSON-safe primitives (e.g., `"high"` instead of `PriorityEnum.HIGH`).
 
 **Error response strategy:**
 
 | HTTP Code | When | Example |
 |-----------|------|---------|
-| 400 | Request body fails Zod validation | Missing ticket_id |
+| 400 | Request body fails Pydantic validation | Missing ticket_id |
 | 500 (JSON) | LLM returned non-parseable output | Model returns prose |
-| 500 (Schema) | LLM output fails structural validation | Missing expected_result field |
+| 500 (Schema) | LLM output fails Pydantic validation | Missing expected_result field |
 | 500 (Catch-all) | OpenAI API errors | Rate limit (429), auth failure |
 
 ---
@@ -353,12 +396,12 @@ const isError = mutation.isError;        // boolean
 
 | Failure Mode | Caught At | Response |
 |-------------|-----------|----------|
-| Missing ticket_id in request | Step 1 (Zod input) | 400 + validation details |
-| Model returns prose instead of JSON | Step 4 (JSON parse) | 500 + "LLM returned invalid JSON" |
-| Model returns 1 test case | Step 5 (superRefine) | 500 + "Expected 3-6 test cases" |
-| Model omits expected_result | Step 5 (Zod schema) | 500 + schema validation error |
-| Model sets priority: "urgent" | Step 5 (Zod enum) | 500 + invalid enum value |
-| OpenAI rate limit (429) | Step 3 (catch) | 500 + rate limit message |
+| Missing ticket_id in request | Step 1 (Pydantic input) | 400 + validation details |
+| Model returns prose instead of JSON | Step 4 (json.loads) | 500 + "LLM returned invalid JSON" |
+| Model returns 1 test case | Step 5 (@model_validator) | 500 + "Expected 3-6 test cases" |
+| Model omits expected_result | Step 5 (Pydantic model) | 500 + schema validation error |
+| Model sets priority: "urgent" | Step 5 (PriorityEnum) | 500 + invalid enum value |
+| OpenAI rate limit (429) | Step 3 (except) | 500 + rate limit message |
 
 **Only clean data reaches the frontend.** Only responses with exactly 3–6 test cases, each with all 9 fields correctly typed, pass through.
 
@@ -555,17 +598,17 @@ Frontend transforms form → JiraTicket payload
   ↓
 useGenerateTestCases() → POST /api/generate
   ↓
-[Zod validates request body]
+[Pydantic validates request body (JiraTicket model)]
   ↓
-[buildSystemPrompt() + buildUserPrompt(ticket)]
+[build_system_prompt() + build_user_prompt(ticket)]
   ↓
-[callOpenAI() → GPT-4o-mini with JSON mode]
+[call_openai() → AsyncOpenAI → GPT-4o-mini with JSON mode]
   ↓
-[JSON.parse() the raw response]
+[json.loads() the raw response]
   ↓
-[Zod validates output + superRefine count check]
+[Pydantic validates output + @model_validator count check]
   ↓
-Return validated GenerateTestCasesResponse
+Return validated GenerateTestCasesResponse.model_dump(mode="json")
   ↓
 Frontend renders animated TestCaseCards
 ```
