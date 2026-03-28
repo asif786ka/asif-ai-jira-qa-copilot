@@ -1,45 +1,27 @@
-/**
- * @module ArchitecturePanel
- * @description Sticky sidebar panel displaying the system architecture overview.
- *
- * Provides at-a-glance technical context for the QA Copilot stack:
- * - Frontend Layer: React 19, Vite, TypeScript, Tailwind CSS v4, Framer Motion
- * - API Layer: Express 5 with Zod request validation
- * - Prompt Engineering: Structured builder with coverage strategy
- * - Output Validation: Zod schema enforcement on all 9 test case fields
- * - Roadmap: Future integration plans (Jira OAuth, XRAY/Zephyr export)
- *
- * The panel is position: sticky to remain visible while scrolling through
- * generated test case results in the center column.
- *
- * @author Asif
- */
-
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/primitives";
 import { Layers, Server, Code2, ShieldCheck, Route } from "lucide-react";
 
 export function ArchitecturePanel() {
-  /** Architecture notes — each entry maps to a visual card with icon + description */
   const notes = [
     {
       icon: <Layers className="h-5 w-5 text-indigo-400" />,
       title: "Frontend Layer",
-      desc: "React 19 + Vite, TypeScript, Tailwind CSS v4, Framer Motion. Powered by generated API hooks.",
+      desc: "React 19 + Vite, TypeScript, Tailwind CSS v4, Framer Motion. Powered by generated API hooks with runtime backend switching.",
     },
     {
-      icon: <Server className="h-5 w-5 text-emerald-400" />,
+      icon: <Server className="h-5 w-5 text-blue-400" />,
       title: "API Layer",
-      desc: "Express 5 + TypeScript. Exposes POST /api/generate with strict Zod request validation.",
+      desc: "FastAPI + Python 3.12. Exposes POST /api/generate with strict Pydantic v2 request validation. Async OpenAI client.",
     },
     {
       icon: <Code2 className="h-5 w-5 text-amber-400" />,
       title: "Prompt Engineering",
-      desc: "Structured prompt builder covering positive, negative, and edge cases. Enforces rigid JSON format.",
+      desc: "Modular prompt builders in Python. Structured coverage: positive, negative, and edge cases. Enforces rigid JSON format.",
     },
     {
       icon: <ShieldCheck className="h-5 w-5 text-rose-400" />,
       title: "Output Validation",
-      desc: "Zod schemas validate all 9 test case fields before returning to client, dropping malformed LLM responses.",
+      desc: "Pydantic models validate all 9 test case fields. @model_validator enforces 3–6 count. Malformed LLM responses are rejected.",
     },
     {
       icon: <Route className="h-5 w-5 text-cyan-400" />,
