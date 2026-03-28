@@ -1,21 +1,21 @@
 import { useState, useEffect } from "react";
-import { setApiPrefix, getApiPrefix } from "@workspace/api-client-react";
+import { setBaseUrl, setApiPrefix, getApiPrefix } from "@workspace/api-client-react";
 import { Server, Zap } from "lucide-react";
 
 type BackendType = "node" | "python";
 
 const STORAGE_KEY = "preferred-backend";
 
-const BACKENDS: Record<BackendType, { label: string; prefix: string; tech: string; color: string }> = {
+const BACKENDS: Record<BackendType, { label: string; baseUrl: string; tech: string; color: string }> = {
   node: {
     label: "Node.js",
-    prefix: "/api",
+    baseUrl: "",
     tech: "Express + Zod",
     color: "from-green-500 to-emerald-400",
   },
   python: {
     label: "Python",
-    prefix: "/pyapi",
+    baseUrl: "/pyapi",
     tech: "FastAPI + Pydantic",
     color: "from-blue-500 to-cyan-400",
   },
@@ -29,18 +29,24 @@ function getStoredBackend(): BackendType {
   return "node";
 }
 
+function applyBackend(backend: BackendType) {
+  const config = BACKENDS[backend];
+  setBaseUrl(config.baseUrl || null);
+  setApiPrefix("/api");
+}
+
 export function BackendSwitcher() {
   const [active, setActive] = useState<BackendType>(getStoredBackend);
 
   useEffect(() => {
-    setApiPrefix(BACKENDS[active].prefix);
+    applyBackend(active);
   }, [active]);
 
   const toggle = () => {
     const next: BackendType = active === "node" ? "python" : "node";
     setActive(next);
     localStorage.setItem(STORAGE_KEY, next);
-    setApiPrefix(BACKENDS[next].prefix);
+    applyBackend(next);
   };
 
   const current = BACKENDS[active];
