@@ -2,7 +2,7 @@ import os
 import json
 import logging
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
@@ -19,6 +19,8 @@ from prompt import build_system_prompt, build_user_prompt
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
+PROXY_PREFIX = os.environ.get("PROXY_PREFIX", "/pyapi")
+
 app = FastAPI(title="Asif AI Jira QA Copilot — Python/FastAPI Backend")
 
 app.add_middleware(
@@ -28,13 +30,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def strip_proxy_prefix(request: Request, call_next):
+    path = request.scope.get("path", "")
+    if PROXY_PREFIX and path.startswith(PROXY_PREFIX):
+        request.scope["path"] = path[len(PROXY_PREFIX):] or "/"
+    return await call_next(request)
 
-@app.get("/pyapi/healthz")
+router = APIRouter(prefix="/api")
+
+
+@router.get("/healthz")
 async def health_check() -> HealthStatus:
     return HealthStatus(status="ok")
 
 
-@app.post("/pyapi/generate")
+@router.post("/generate")
 async def generate_test_cases(request: Request) -> JSONResponse:
     try:
         body = await request.json()
@@ -44,7 +55,7 @@ async def generate_test_cases(request: Request) -> JSONResponse:
             content=ErrorResponse(
                 error="Invalid request payload",
                 details="Request body must be valid JSON.",
-            ).model_dump(),
+            ).model_dump(mode="json"),
         )
 
     try:
@@ -55,7 +66,7 @@ async def generate_test_cases(request: Request) -> JSONResponse:
             content=ErrorResponse(
                 error="Invalid request payload",
                 details=str(e),
-            ).model_dump(),
+            ).model_dump(mode="json"),
         )
 
     try:
@@ -73,7 +84,7 @@ async def generate_test_cases(request: Request) -> JSONResponse:
                 content=ErrorResponse(
                     error="LLM returned invalid JSON",
                     details="The model did not return parseable JSON. Please try again.",
-                ).model_dump(),
+                ).model_dump(mode="json"),
             )
 
         try:
@@ -85,10 +96,10 @@ async def generate_test_cases(request: Request) -> JSONResponse:
                 content=ErrorResponse(
                     error="LLM response failed schema validation",
                     details=str(e),
-                ).model_dump(),
+                ).model_dump(mode="json"),
             )
 
-        return JSONResponse(content=validated.model_dump())
+        return JSONResponse(content=validated.model_dump(mode="json"))
 
     except Exception as e:
         logger.error("Error calling OpenAI: %s", str(e))
@@ -97,9 +108,11 @@ async def generate_test_cases(request: Request) -> JSONResponse:
             content=ErrorResponse(
                 error="Failed to generate test cases",
                 details=str(e),
-            ).model_dump(),
+            ).model_dump(mode="json"),
         )
 
+
+app.include_router(router)
 
 if __name__ == "__main__":
     import uvicorn
