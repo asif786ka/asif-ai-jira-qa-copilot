@@ -17,6 +17,7 @@ const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
 
 let _baseUrl: string | null = null;
 let _authTokenGetter: AuthTokenGetter | null = null;
+let _apiPrefix: string = "/api";
 
 /**
  * Set a base URL that is prepended to every relative request URL
@@ -37,6 +38,14 @@ export function setBaseUrl(url: string | null): void {
  * Useful for Expo bundles making token-gated API calls.
  * Pass `null` to clear the getter.
  */
+export function setApiPrefix(prefix: string): void {
+  _apiPrefix = prefix.replace(/\/+$/, "");
+}
+
+export function getApiPrefix(): string {
+  return _apiPrefix;
+}
+
 export function setAuthTokenGetter(getter: AuthTokenGetter | null): void {
   _authTokenGetter = getter;
 }
@@ -57,10 +66,19 @@ function isUrl(input: RequestInfo | URL): input is URL {
   return typeof URL !== "undefined" && input instanceof URL;
 }
 
+function rewriteApiPrefix(input: RequestInfo | URL): RequestInfo | URL {
+  if (_apiPrefix === "/api") return input;
+  const url = resolveUrl(input);
+  if (!url.startsWith("/api/") && url !== "/api" && !url.startsWith("/api?")) return input;
+  const rewritten = url.replace(/^\/api(?=\/|$|\?)/, _apiPrefix);
+  if (typeof input === "string") return rewritten;
+  if (isRequest(input)) return new Request(rewritten, input);
+  return input;
+}
+
 function applyBaseUrl(input: RequestInfo | URL): RequestInfo | URL {
   if (!_baseUrl) return input;
   const url = resolveUrl(input);
-  // Only prepend to relative paths (starting with /)
   if (!url.startsWith("/")) return input;
 
   const absolute = `${_baseUrl}${url}`;
@@ -323,6 +341,7 @@ export async function customFetch<T = unknown>(
   input: RequestInfo | URL,
   options: CustomFetchOptions = {},
 ): Promise<T> {
+  input = rewriteApiPrefix(input);
   input = applyBaseUrl(input);
   const { responseType = "auto", headers: headersInit, ...init } = options;
 
