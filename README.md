@@ -120,7 +120,7 @@ This project implements **both** so you can compare the same validation pipeline
 │   │           ├── generate.ts # POST /api/generate endpoint
 │   │           └── health.ts   # GET /api/healthz endpoint
 │   ├── api-server-python/     # FastAPI backend (Python)
-│   │   ├── main.py            # FastAPI app + routes (POST /pyapi/generate)
+│   │   ├── main.py            # FastAPI app + routes (same /api/* contract)
 │   │   ├── models.py          # Pydantic v2 models (JiraTicket, TestCase, etc.)
 │   │   ├── openai_client.py   # Lazy OpenAI client (same pattern as Node.js)
 │   │   └── prompt.py          # System + user prompt builders (Python port)
