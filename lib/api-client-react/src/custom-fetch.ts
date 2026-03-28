@@ -39,7 +39,11 @@ export function setBaseUrl(url: string | null): void {
  * Pass `null` to clear the getter.
  */
 export function setApiPrefix(prefix: string): void {
-  _apiPrefix = prefix.replace(/\/+$/, "");
+  let normalized = prefix.replace(/\/+$/, "");
+  if (normalized && !normalized.startsWith("/")) {
+    normalized = "/" + normalized;
+  }
+  _apiPrefix = normalized || "/api";
 }
 
 export function getApiPrefix(): string {
@@ -69,8 +73,25 @@ function isUrl(input: RequestInfo | URL): input is URL {
 function rewriteApiPrefix(input: RequestInfo | URL): RequestInfo | URL {
   if (_apiPrefix === "/api") return input;
   const url = resolveUrl(input);
-  if (!url.startsWith("/api/") && url !== "/api" && !url.startsWith("/api?")) return input;
-  const rewritten = url.replace(/^\/api(?=\/|$|\?)/, _apiPrefix);
+
+  let pathname = url;
+  try {
+    if (url.startsWith("http://") || url.startsWith("https://")) {
+      const parsed = new URL(url);
+      if (!parsed.pathname.startsWith("/api/") && parsed.pathname !== "/api") return input;
+      parsed.pathname = parsed.pathname.replace(/^\/api(?=\/|$)/, _apiPrefix);
+      const abs = parsed.toString();
+      if (typeof input === "string") return abs;
+      if (isRequest(input)) return new Request(abs, input);
+      if (isUrl(input)) return new URL(abs);
+      return abs;
+    }
+  } catch {
+    // fall through to relative-path handling
+  }
+
+  if (!pathname.startsWith("/api/") && pathname !== "/api" && !pathname.startsWith("/api?")) return input;
+  const rewritten = pathname.replace(/^\/api(?=\/|$|\?)/, _apiPrefix);
   if (typeof input === "string") return rewritten;
   if (isRequest(input)) return new Request(rewritten, input);
   return input;
